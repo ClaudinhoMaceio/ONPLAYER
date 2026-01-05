@@ -1,0 +1,1692 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="Sistema de Mídia Indoor - Player de apresentações offline">
+    <meta name="theme-color" content="#1f2937">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="ONPLAYER">
+    <title>ONPLAYER | Sistema de Mídia Indoor</title>
+    
+    <!-- 
+        ================================================================
+        DEPENDÊNCIAS EXTERNAS (CDNs)
+        ================================================================
+        1. TailwindCSS: Para estilização rápida e responsiva.
+        2. FontAwesome: Para ícones.
+        3. PDF.js: Para renderizar apresentações (PPT salvos como PDF).
+    -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <!-- Google Cast SDK -->
+    <script src="https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1"></script>
+    <script>
+        // Configuração do Worker do PDF.js
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+
+    <!-- MANIFESTO PWA (Gerado Dinamicamente para funcionar em arquivo único) -->
+    <link rel="manifest" id="manifest-placeholder">
+
+    <style>
+        /* * ESTILOS CUSTOMIZADOS
+         * Ajustes finos que o Tailwind não cobre ou animações específicas.
+         */
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            overflow: hidden; /* Evita barras de rolagem no player */
+            background-color: #000;
+            color: #fff;
+            user-select: none; /* Evita seleção de texto em totens touch */
+        }
+
+        /* Classes utilitárias para esconder/mostrar telas */
+        .view-section {
+            display: none;
+            width: 100vw;
+            height: 100vh;
+            position: absolute;
+            top: 0;
+            left: 0;
+        }
+
+        .view-section.active {
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Animações de transição de slides */
+        .fade-in {
+            animation: fadeIn 1s ease-in-out;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; }
+            to { opacity: 1; }
+        }
+
+        /* Loader Elegante */
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        /* Scrollbar customizada para o Admin */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #1a1a1a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #444; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #555; 
+        }
+        
+        /* Ajuste para canvas do PDF ocupar tudo */
+        #pdf-canvas {
+            max-width: 100%;
+            max-height: 100%;
+            object-fit: contain;
+        }
+
+        /* --- SISTEMA DE ROTAÇÃO DE TELA (CSS Puro) --- */
+        #rotation-wrapper {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            transition: transform 0.5s ease;
+            position: relative;
+        }
+
+        /* Modo Horizontal (Padrão) - 0 graus */
+        .rotate-0 { 
+            transform: rotate(0deg); 
+        }
+
+        /* Modo Vertical (Retrato) - 90 graus (Tomba para direita) */
+        .rotate-90 { 
+            transform: rotate(90deg); 
+            width: 100vh !important; /* Inverte largura com altura */
+            height: 100vw !important;
+        }
+
+        /* Modo Horizontal Invertido - 180 graus */
+        .rotate-180 { 
+            transform: rotate(180deg); 
+        }
+
+        /* Modo Vertical Invertido - 270 graus (Tomba para esquerda) */
+        .rotate-270 { 
+            transform: rotate(270deg); 
+            width: 100vh !important;
+            height: 100vw !important;
+        }
+
+        /* Responsividade Mobile */
+        @media (max-width: 768px) {
+            #view-login > div {
+                width: 90% !important;
+                max-width: 400px;
+                padding: 1.5rem !important;
+            }
+
+            #view-login .text-5xl {
+                font-size: 3rem !important;
+            }
+
+            #view-admin header {
+                flex-direction: column;
+                gap: 1rem;
+                padding: 1rem !important;
+            }
+
+            #view-admin header > div:last-child {
+                width: 100%;
+                flex-wrap: wrap;
+            }
+
+            #view-admin header button {
+                flex: 1;
+                min-width: 120px;
+            }
+
+            #view-admin main {
+                padding: 1rem !important;
+            }
+
+            #view-admin .grid {
+                grid-template-columns: 1fr !important;
+            }
+
+            table {
+                font-size: 0.75rem;
+            }
+
+            table th, table td {
+                padding: 0.5rem !important;
+            }
+
+            #clock {
+                font-size: 1.5rem !important;
+            }
+
+            #date {
+                font-size: 0.625rem !important;
+            }
+
+            .absolute.top-8.right-8 {
+                top: 0.5rem !important;
+                right: 0.5rem !important;
+                padding: 0.5rem !important;
+            }
+
+            .absolute.bottom-8.left-8 {
+                bottom: 0.5rem !important;
+                left: 0.5rem !important;
+                padding: 0.5rem !important;
+                font-size: 0.75rem !important;
+            }
+        }
+
+        @media (max-width: 480px) {
+            #view-login > div {
+                padding: 1rem !important;
+            }
+
+            #view-login h1 {
+                font-size: 1.5rem !important;
+            }
+
+            #view-admin header h2 {
+                font-size: 1rem !important;
+            }
+
+            table {
+                display: block;
+                overflow-x: auto;
+                white-space: nowrap;
+            }
+
+            #storage-info {
+                font-size: 0.625rem !important;
+                padding: 0.25rem 0.5rem !important;
+            }
+
+            table th {
+                font-size: 0.625rem !important;
+            }
+
+            .border-2.border-dashed {
+                min-height: 150px;
+            }
+        }
+
+        /* Touch improvements */
+        @media (hover: none) and (pointer: coarse) {
+            button, input, select {
+                min-height: 44px;
+            }
+        }
+
+        /* Instalar PWA Button e Modal */
+        #install-pwa-btn {
+            position: fixed;
+            bottom: 1rem;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 9999;
+            display: none;
+            animation: slideUp 0.3s ease-out;
+        }
+
+        #install-pwa-btn.show {
+            display: flex;
+        }
+
+        @keyframes slideUp {
+            from {
+                transform: translateX(-50%) translateY(100px);
+                opacity: 0;
+            }
+            to {
+                transform: translateX(-50%) translateY(0);
+                opacity: 1;
+            }
+        }
+
+        #install-modal {
+            backdrop-filter: blur(5px);
+        }
+
+        .install-option-card {
+            transition: all 0.3s;
+        }
+
+        .install-option-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 25px rgba(0, 0, 0, 0.3);
+        }
+
+        /* Casting UI */
+        #cast-devices-list {
+            max-height: 300px;
+            overflow-y: auto;
+        }
+
+        .cast-device-item {
+            transition: all 0.2s;
+        }
+
+        .cast-device-item:hover {
+            background-color: rgba(59, 130, 246, 0.2);
+        }
+
+        #cast-status {
+            animation: pulse 2s infinite;
+        }
+
+    </style>
+</head>
+<body>
+
+    <!-- Botão de Instalar PWA -->
+    <button id="install-pwa-btn" class="bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-lg shadow-2xl flex items-center gap-2 transition">
+        <i class="fa-solid fa-download"></i> <span class="hidden sm:inline">Instalar App</span><span class="sm:hidden">Instalar</span>
+    </button>
+
+    <!-- Modal de Instalação PWA -->
+    <div id="install-modal" class="fixed inset-0 bg-black/80 z-[10000] hidden items-center justify-center px-4">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-lg border border-gray-700 shadow-2xl">
+            <div class="text-center mb-6">
+                <i class="fa-solid fa-mobile-screen-button text-5xl text-blue-500 mb-4"></i>
+                <h3 class="text-2xl font-bold text-white mb-2">Instalar ONPLAYER</h3>
+                <p class="text-gray-400 text-sm">Instale o app para acesso rápido e funcionamento offline completo</p>
+            </div>
+            
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+                <!-- Opção: Instalar -->
+                <div class="install-option-card bg-gradient-to-br from-blue-600 to-blue-700 p-6 rounded-lg cursor-pointer border-2 border-blue-500" onclick="app.pwa.showInstallPrompt()">
+                    <div class="text-center">
+                        <i class="fa-solid fa-download text-3xl text-white mb-3"></i>
+                        <h4 class="text-white font-bold mb-2">Instalar App</h4>
+                        <p class="text-blue-100 text-xs">Acesso rápido, funciona offline, ícone na tela inicial</p>
+                    </div>
+                </div>
+
+                <!-- Opção: Usar sem instalar -->
+                <div class="install-option-card bg-gray-700 p-6 rounded-lg cursor-pointer border-2 border-gray-600 hover:border-gray-500" onclick="app.pwa.useWithoutInstall()">
+                    <div class="text-center">
+                        <i class="fa-solid fa-globe text-3xl text-gray-300 mb-3"></i>
+                        <h4 class="text-white font-bold mb-2">Usar no Navegador</h4>
+                        <p class="text-gray-400 text-xs">Continue usando sem instalar (funciona offline também)</p>
+                    </div>
+                </div>
+            </div>
+
+            <div class="bg-blue-900/30 border border-blue-800 rounded-lg p-4 mb-4">
+                <p class="text-xs text-blue-200">
+                    <i class="fa-solid fa-info-circle mr-2"></i>
+                    <strong>Vantagens de instalar:</strong> Acesso rápido, funciona 100% offline, ícone na tela inicial, melhor desempenho
+                </p>
+            </div>
+
+            <button onclick="app.pwa.hideInstallModal()" class="w-full bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-white text-sm font-bold transition">
+                Fechar
+            </button>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 1. TELA DE LOGIN (PROTEÇÃO DO ADMIN)       -->
+    <!-- ========================================== -->
+    <div id="view-login" class="view-section active bg-gray-900 items-center justify-center z-50 px-4">
+        <div class="bg-gray-800 p-8 rounded-lg shadow-2xl w-full max-w-md text-center border border-gray-700">
+            <div class="mb-6">
+                <i class="fa-solid fa-play-circle text-5xl text-blue-500"></i>
+                <h1 class="text-2xl font-bold mt-2 text-white">ONPLAYER</h1>
+                <p class="text-gray-400 text-sm">Sistema de Mídia Indoor</p>
+            </div>
+            <input type="password" id="login-pass" placeholder="Senha de Acesso" 
+                class="w-full p-3 mb-4 rounded bg-gray-700 text-white border border-gray-600 focus:outline-none focus:border-blue-500 transition">
+            <button onclick="app.auth.login()" 
+                class="w-full bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 rounded transition shadow-lg mb-3">
+                ENTRAR
+            </button>
+            <button onclick="app.player.start(true)" 
+                class="w-full bg-green-600 hover:bg-green-500 text-white font-bold py-3 rounded transition shadow-lg">
+                <i class="fa-solid fa-play mr-2"></i> ENTRAR NO PLAY DIRETO
+            </button>
+        </div>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 2. PAINEL ADMINISTRATIVO (GERENCIADOR)     -->
+    <!-- ========================================== -->
+    <div id="view-admin" class="view-section bg-gray-900 z-40 overflow-auto">
+        <!-- Header Admin -->
+        <header class="bg-gray-800 p-4 border-b border-gray-700 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 sticky top-0 z-10 shadow-md">
+            <div class="flex items-center gap-3">
+                <i class="fa-solid fa-layer-group text-blue-500 text-xl"></i>
+                <h2 class="text-xl font-bold text-white">Painel de Controle</h2>
+            </div>
+            <div class="flex flex-wrap gap-2 w-full sm:w-auto">
+                <div id="storage-info" class="text-xs text-gray-400 flex items-center bg-gray-700 px-3 py-1 rounded-full">
+                    <i class="fa-solid fa-database mr-2"></i> Calculando...
+                </div>
+                <button onclick="app.cast.showDevices()" class="bg-purple-600 hover:bg-purple-500 px-4 py-2 rounded text-white text-sm font-bold flex items-center gap-2 shadow-lg transition-all" title="Espelhar para TV">
+                    <i class="fa-solid fa-tv"></i> <span class="hidden sm:inline">ESPELHAR TV</span>
+                </button>
+                <button onclick="app.player.start()" class="bg-green-600 hover:bg-green-500 px-4 py-2 rounded text-white text-sm font-bold flex items-center gap-2 shadow-lg hover:shadow-green-500/20 transition-all flex-1 sm:flex-none">
+                    <i class="fa-solid fa-play"></i> <span class="hidden sm:inline">INICIAR PLAYER</span><span class="sm:hidden">PLAYER</span>
+                </button>
+                <button onclick="app.auth.logout()" class="bg-red-600 hover:bg-red-500 px-4 py-2 rounded text-white text-sm font-bold shadow-lg">
+                    <i class="fa-solid fa-power-off"></i>
+                </button>
+            </div>
+        </header>
+
+        <main class="p-4 sm:p-6 max-w-6xl mx-auto w-full">
+            
+            <!-- Área de Upload e Configuração -->
+            <div class="bg-gray-800 rounded-lg p-4 sm:p-6 mb-6 sm:mb-8 border border-gray-700 shadow-lg">
+                <h3 class="text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
+                    <i class="fa-solid fa-gears"></i> Adicionar e Configurar
+                </h3>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <!-- Upload Arquivo Local -->
+                    <div class="border-2 border-dashed border-gray-600 rounded-lg p-6 text-center hover:bg-gray-700/50 transition cursor-pointer relative flex flex-col items-center justify-center" id="drop-zone">
+                        <input type="file" id="file-input" class="absolute inset-0 w-full h-full opacity-0 cursor-pointer" accept="image/*,video/*,application/pdf" multiple onchange="app.media.handleFileSelect(this)">
+                        <i class="fa-solid fa-file-circle-plus text-4xl text-gray-500 mb-2"></i>
+                        <p class="text-sm font-bold text-gray-300">Clique ou arraste arquivos</p>
+                        <p class="text-xs text-gray-500 mt-1">Imagens, Vídeos (MP4) e PDF (Apresentações)</p>
+                        <p class="text-[10px] text-green-400 mt-2"><i class="fa-solid fa-database"></i> Salvo automaticamente no banco de dados</p>
+                    </div>
+
+                    <!-- Configurações Rápidas -->
+                    <div class="flex flex-col gap-4">
+                        
+                        <!-- Rotação de Tela -->
+                        <div class="bg-gray-700 p-4 rounded-lg border border-gray-600">
+                            <label class="text-xs uppercase text-gray-400 font-bold mb-2 block">
+                                <i class="fa-solid fa-rotate"></i> Orientação da Tela (TV/Monitor)
+                            </label>
+                            <select id="screen-rotation" onchange="app.settings.save()" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white text-sm">
+                                <option value="0">Horizontal Padrão (0°)</option>
+                                <option value="90">Vertical (TV em Pé - 90°)</option>
+                                <option value="180">Horizontal Invertido (180°)</option>
+                                <option value="270">Vertical Invertido (270°)</option>
+                            </select>
+                            <p class="text-[10px] text-gray-400 mt-1">Use "Vertical" se sua TV está em pé mas o Windows/Android mostra a imagem deitada.</p>
+                        </div>
+
+                         <div class="bg-gray-700 p-4 rounded-lg">
+                            <label class="text-xs uppercase text-gray-400 font-bold mb-1 block">Tempo Padrão por Slide (seg)</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="default-duration" value="10" class="w-full bg-gray-900 border border-gray-600 rounded p-2 text-white">
+                            </div>
+                        </div>
+
+                        <!-- Info Powerpoint -->
+                        <div class="bg-blue-900/30 p-4 rounded-lg border border-blue-800">
+                            <h4 class="text-sm font-bold text-blue-300 mb-1"><i class="fa-brands fa-windows"></i> PowerPoint</h4>
+                            <p class="text-xs text-gray-300">
+                                Converta seu PPT para <b>PDF</b> e faça upload. Funciona 100% offline e vertical.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Lista de Playlist -->
+            <div class="bg-gray-800 rounded-lg p-4 sm:p-6 border border-gray-700 shadow-lg">
+                <h3 class="text-base sm:text-lg font-semibold mb-4 text-blue-400 flex items-center gap-2">
+                    <i class="fa-solid fa-list-ul"></i> Playlist (Salva Automaticamente)
+                </h3>
+                
+                <!-- Tabela de itens -->
+                <div class="overflow-x-auto -mx-4 sm:mx-0">
+                    <table class="w-full text-left text-xs sm:text-sm text-gray-400 min-w-full">
+                        <thead class="bg-gray-700 text-gray-200 uppercase text-xs">
+                            <tr>
+                                <th class="p-3">Mídia</th>
+                                <th class="p-3">Nome</th>
+                                <th class="p-3">Tipo</th>
+                                <th class="p-3">Duração (s)</th>
+                                <th class="p-3 text-right">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody id="playlist-container" class="divide-y divide-gray-700">
+                            <!-- Os itens serão injetados aqui via JS -->
+                        </tbody>
+                    </table>
+                </div>
+                <div id="empty-state" class="text-center py-10 hidden">
+                    <i class="fa-solid fa-inbox text-4xl text-gray-600 mb-3"></i>
+                    <p class="text-gray-500">Playlist vazia.</p>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 3. PLAYER (TELA DE EXIBIÇÃO)               -->
+    <!-- ========================================== -->
+    <div id="view-player" class="view-section bg-black z-30 cursor-none overflow-hidden">
+        
+        <!-- WRAPPER DE ROTAÇÃO -->
+        <!-- Tudo dentro daqui será rotacionado conforme a configuração -->
+        <div id="rotation-wrapper">
+            
+            <!-- Container de Mídia Central -->
+            <div id="media-container" class="w-full h-full flex items-center justify-center relative">
+                <!-- As tags <img>, <video>, <canvas> serão injetadas aqui -->
+            </div>
+
+            <!-- Overlays (Relógio, Notícias, Logo) -->
+            <!-- Eles ficam dentro do wrapper para rotacionarem junto com a tela -->
+            <div class="absolute top-4 right-4 sm:top-8 sm:right-8 z-50 bg-black/50 backdrop-blur-sm px-3 py-2 sm:px-6 sm:py-3 rounded-xl border border-white/10 flex items-center gap-2 sm:gap-4 shadow-2xl">
+                <div id="clock" class="text-2xl sm:text-4xl font-bold font-mono tracking-widest text-white drop-shadow-md">00:00</div>
+                <div class="h-6 sm:h-10 w-px bg-gray-500"></div>
+                <div id="date" class="text-xs sm:text-sm font-semibold text-gray-300 uppercase tracking-wider">--/--</div>
+            </div>
+
+            <!-- Botão de Casting no Player -->
+            <button onclick="app.cast.showDevices()" class="absolute bottom-4 right-4 sm:bottom-8 sm:right-8 z-50 bg-purple-600/80 hover:bg-purple-600 px-3 py-2 sm:px-4 sm:py-2 rounded-lg text-white text-xs sm:text-sm font-bold flex items-center gap-2 shadow-lg transition" title="Espelhar para TV">
+                <i class="fa-solid fa-tv"></i> <span class="hidden sm:inline">ESPELHAR</span>
+            </button>
+
+            <!-- Indicador de Offline/Online -->
+            <div id="status-indicator" class="absolute bottom-4 left-4 sm:bottom-8 sm:left-8 z-50 text-xs sm:text-sm font-bold px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg bg-red-600 text-white hidden opacity-80 shadow-lg flex items-center gap-2">
+                <i class="fa-solid fa-wifi-slash"></i> <span class="hidden sm:inline">OFFLINE</span><span class="sm:hidden">OFF</span>
+            </div>
+
+            <!-- Indicador de Casting -->
+            <div id="cast-status" class="absolute top-4 left-4 sm:top-8 sm:left-8 z-50 text-xs sm:text-sm font-bold px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg bg-purple-600 text-white hidden opacity-90 shadow-lg flex items-center gap-2">
+                <i class="fa-solid fa-tv"></i> <span id="cast-device-name">Espelhando...</span>
+                <button onclick="app.cast.stop()" class="ml-2 hover:bg-purple-700 rounded px-2 py-1">
+                    <i class="fa-solid fa-times"></i>
+                </button>
+            </div>
+
+        </div>
+
+        <!-- Botão Secreto de Saída (Fixo na tela física, não roda) -->
+        <!-- Mantido fora do rotation-wrapper para o clique ser sempre no canto físico da tela -->
+        <div class="fixed bottom-0 right-0 w-32 h-32 z-[100] cursor-pointer" 
+             ondblclick="app.player.stop()"
+             title="Clique duplo para sair"></div>
+             
+    </div>
+
+    <!-- Modal de Dispositivos de Casting -->
+    <div id="cast-modal" class="fixed inset-0 bg-black/80 z-[200] hidden items-center justify-center">
+        <div class="bg-gray-800 rounded-lg p-6 w-full max-w-md mx-4 border border-gray-700 shadow-2xl">
+            <div class="flex justify-between items-center mb-4">
+                <h3 class="text-xl font-bold text-white flex items-center gap-2">
+                    <i class="fa-solid fa-tv text-purple-500"></i> Espelhar para TV
+                </h3>
+                <button onclick="app.cast.hideDevices()" class="text-gray-400 hover:text-white">
+                    <i class="fa-solid fa-times text-xl"></i>
+                </button>
+            </div>
+            <div id="cast-devices-list" class="space-y-2 mb-4">
+                <div class="text-center text-gray-400 py-4">
+                    <i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i>
+                    <p>Procurando dispositivos...</p>
+                </div>
+            </div>
+            <div class="flex gap-2">
+                <button onclick="app.cast.scanDevices()" class="flex-1 bg-gray-700 hover:bg-gray-600 px-4 py-2 rounded text-white text-sm font-bold">
+                    <i class="fa-solid fa-sync-alt mr-2"></i> Atualizar
+                </button>
+                <button onclick="app.cast.startMirroring()" class="flex-1 bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded text-white text-sm font-bold">
+                    <i class="fa-solid fa-mobile-screen-button mr-2"></i> Espelhar Tela
+                </button>
+            </div>
+        </div>
+    </div>
+             
+    </div>
+
+    <!-- ========================================== -->
+    <!-- 4. LÓGICA JAVASCRIPT (APP CORE)            -->
+    <!-- ========================================== -->
+    <script>
+        /**
+         * ONPLAYER SYSTEM CORE
+         * Estrutura:
+         * 1. DB: Gerencia IndexedDB (Armazenamento offline persistente).
+         * 2. Media: Manipula arquivos e uploads.
+         * 3. Player: Lógica de rotação de conteúdo e renderização.
+         * 4. Settings: Gerencia configurações (Rotação, etc).
+         * 5. UI: Manipula o DOM.
+         */
+
+        const APP_CONFIG = {
+            dbName: 'ONPLAYER_DB',
+            storeName: 'media_items',
+            password: 'claudinho2029' // Em produção, usar hash
+        };
+
+        const app = {
+            state: {
+                playlist: [],
+                currentIndex: 0,
+                currentPDFPage: 1,
+                isPlaying: false,
+                slideInterval: null,
+                rotation: 0,
+                pausedItems: [] // Array de IDs dos itens pausados
+            },
+
+            // --- INICIALIZAÇÃO ---
+            init: async () => {
+                console.log("ONPLAYER: Iniciando...");
+                await app.db.init();
+                app.settings.load(); // Carrega configurações de rotação
+                app.ui.updateClock();
+                setInterval(app.ui.updateClock, 1000);
+                app.pwa.register();
+                app.cast.init(); // Inicializa sistema de casting
+                
+                // Monitoramento de Rede
+                window.addEventListener('online', app.ui.updateNetworkStatus);
+                window.addEventListener('offline', app.ui.updateNetworkStatus);
+                app.ui.updateNetworkStatus();
+
+                // Carrega playlist salva
+                // IMPORTANTE: Isso garante que os dados persistam após o refresh
+                await app.media.loadPlaylist();
+            },
+
+            // --- MÓDULO DE CONFIGURAÇÕES ---
+            settings: {
+                load: () => {
+                    const savedRotation = localStorage.getItem('onplayer_rotation');
+                    if (savedRotation) {
+                        app.state.rotation = parseInt(savedRotation);
+                        document.getElementById('screen-rotation').value = savedRotation;
+                    }
+                },
+                save: () => {
+                    const rotationVal = document.getElementById('screen-rotation').value;
+                    app.state.rotation = parseInt(rotationVal);
+                    localStorage.setItem('onplayer_rotation', rotationVal);
+                },
+                applyRotation: () => {
+                    const wrapper = document.getElementById('rotation-wrapper');
+                    // Remove todas as classes de rotação antigas
+                    wrapper.classList.remove('rotate-0', 'rotate-90', 'rotate-180', 'rotate-270');
+                    // Adiciona a nova
+                    wrapper.classList.add(`rotate-${app.state.rotation}`);
+                }
+            },
+
+            // --- MÓDULO DE AUTENTICAÇÃO ---
+            auth: {
+                login: () => {
+                    const pass = document.getElementById('login-pass').value;
+                    if (pass === APP_CONFIG.password) {
+                        app.ui.navigate('view-admin');
+                    } else {
+                        alert('Senha incorreta!');
+                    }
+                },
+                logout: () => {
+                    document.getElementById('login-pass').value = '';
+                    app.ui.navigate('view-login');
+                }
+            },
+
+            // --- MÓDULO DATABASE (IndexedDB - PERSISTÊNCIA) ---
+            db: {
+                instance: null,
+
+                init: () => {
+                    return new Promise((resolve, reject) => {
+                        const request = indexedDB.open(APP_CONFIG.dbName, 1);
+
+                        request.onupgradeneeded = (event) => {
+                            const db = event.target.result;
+                            if (!db.objectStoreNames.contains(APP_CONFIG.storeName)) {
+                                db.createObjectStore(APP_CONFIG.storeName, { keyPath: 'id', autoIncrement: true });
+                            }
+                        };
+
+                        request.onsuccess = (event) => {
+                            app.db.instance = event.target.result;
+                            app.media.updateStorageInfo();
+                            resolve();
+                        };
+
+                        request.onerror = (event) => {
+                            console.error("Erro no DB:", event.target.error);
+                            reject(event.target.error);
+                        };
+                    });
+                },
+
+                add: (item) => {
+                    // Adiciona permanentemente ao disco
+                    return new Promise((resolve, reject) => {
+                        const transaction = app.db.instance.transaction([APP_CONFIG.storeName], 'readwrite');
+                        const store = transaction.objectStore(APP_CONFIG.storeName);
+                        const request = store.add(item);
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                },
+
+                getAll: () => {
+                    return new Promise((resolve, reject) => {
+                        const transaction = app.db.instance.transaction([APP_CONFIG.storeName], 'readonly');
+                        const store = transaction.objectStore(APP_CONFIG.storeName);
+                        const request = store.getAll();
+                        request.onsuccess = () => resolve(request.result);
+                        request.onerror = () => reject(request.error);
+                    });
+                },
+
+                delete: (id) => {
+                    // Única forma de remover um item
+                    return new Promise((resolve, reject) => {
+                        const transaction = app.db.instance.transaction([APP_CONFIG.storeName], 'readwrite');
+                        const store = transaction.objectStore(APP_CONFIG.storeName);
+                        const request = store.delete(id);
+                        request.onsuccess = () => resolve();
+                    });
+                }
+            },
+
+            // --- MÓDULO DE MÍDIA E PLAYLIST ---
+            media: {
+                handleFileSelect: async (input) => {
+                    const files = input.files;
+                    if (!files.length) return;
+
+                    const defaultDuration = parseInt(document.getElementById('default-duration').value) || 10;
+                    
+                    const btn = document.querySelector('#drop-zone p');
+                    const originalText = btn.innerText;
+                    btn.innerText = "Salvando no Banco de Dados...";
+                    btn.classList.add("text-blue-400", "animate-pulse");
+
+                    for (let file of files) {
+                        const fileType = file.type.startsWith('image/') ? 'image' : 
+                                         file.type.startsWith('video/') ? 'video' : 
+                                         file.type === 'application/pdf' ? 'pdf' : 'unknown';
+
+                        if (fileType === 'unknown') {
+                            alert(`Arquivo ${file.name} não suportado. Use JPG, PNG, MP4 ou PDF.`);
+                            continue;
+                        }
+
+                        const newItem = {
+                            name: file.name,
+                            type: fileType,
+                            blob: file, // O Blob é salvo fisicamente no IndexedDB
+                            duration: defaultDuration, 
+                            addedAt: new Date().getTime()
+                        };
+
+                        await app.db.add(newItem);
+                    }
+
+                    btn.innerText = originalText;
+                    btn.classList.remove("text-blue-400", "animate-pulse");
+                    input.value = ''; 
+                    await app.media.loadPlaylist(); 
+                },
+
+                loadPlaylist: async () => {
+                    const items = await app.db.getAll();
+                    app.state.playlist = items;
+                    
+                    // Carrega itens pausados do localStorage
+                    const savedPaused = localStorage.getItem('onplayer_paused_items');
+                    if (savedPaused) {
+                        try {
+                            app.state.pausedItems = JSON.parse(savedPaused);
+                        } catch (e) {
+                            app.state.pausedItems = [];
+                        }
+                    }
+                    
+                    app.ui.renderPlaylistTable(items);
+                    app.media.updateStorageInfo();
+                },
+
+                deleteItem: async (id) => {
+                    if(confirm('Tem certeza? Isso apagará o arquivo permanentemente do sistema.')) {
+                        await app.db.delete(id);
+                        // Remove da lista de pausados se estiver lá
+                        app.state.pausedItems = app.state.pausedItems.filter(itemId => itemId !== id);
+                        await app.media.loadPlaylist();
+                    }
+                },
+
+                togglePauseItem: async (id) => {
+                    const index = app.state.pausedItems.indexOf(id);
+                    if (index > -1) {
+                        // Despausa
+                        app.state.pausedItems.splice(index, 1);
+                    } else {
+                        // Pausa
+                        app.state.pausedItems.push(id);
+                    }
+                    // Salva no localStorage
+                    localStorage.setItem('onplayer_paused_items', JSON.stringify(app.state.pausedItems));
+                    // Atualiza a tabela
+                    await app.media.loadPlaylist();
+                },
+
+                isItemPaused: (id) => {
+                    return app.state.pausedItems.includes(id);
+                },
+
+                updateDuration: async (id, newDuration) => {
+                    const transaction = app.db.instance.transaction([APP_CONFIG.storeName], 'readwrite');
+                    const store = transaction.objectStore(APP_CONFIG.storeName);
+                    
+                    const itemIndex = app.state.playlist.findIndex(i => i.id === id);
+                    if (itemIndex > -1) {
+                        app.state.playlist[itemIndex].duration = parseInt(newDuration);
+                        store.put(app.state.playlist[itemIndex]); // Atualiza persistência
+                    }
+                },
+
+                updateStorageInfo: async () => {
+                    if (navigator.storage && navigator.storage.estimate) {
+                        const estimate = await navigator.storage.estimate();
+                        const usedMB = (estimate.usage / 1024 / 1024).toFixed(2);
+                        document.getElementById('storage-info').innerHTML = 
+                            `<i class="fa-solid fa-database mr-2"></i> ${usedMB} MB (Persistente)`;
+                    }
+                }
+            },
+
+            // --- MÓDULO PLAYER (ENGINE) ---
+            player: {
+                start: (skipAdmin = false) => {
+                    if (app.state.playlist.length === 0) {
+                        alert("Playlist vazia! Adicione arquivos no Painel Admin.");
+                        return; 
+                    }
+                    
+                    // Verifica se há itens ativos (não pausados)
+                    const activeItems = app.state.playlist.filter(item => !app.media.isItemPaused(item.id));
+                    if (activeItems.length === 0) {
+                        alert("Todos os itens estão pausados. Despause pelo menos um item para iniciar o player.");
+                        return;
+                    }
+                    
+                    // Encontra o primeiro item ativo
+                    const firstActiveItem = activeItems[0];
+                    app.state.currentIndex = app.state.playlist.findIndex(item => item.id === firstActiveItem.id);
+                    app.state.isPlaying = true;
+                    
+                    // Aplica a rotação configurada antes de mostrar o player
+                    app.settings.applyRotation();
+
+                    app.ui.navigate('view-player');
+                    
+                    const elem = document.documentElement;
+                    if (elem.requestFullscreen) {
+                        elem.requestFullscreen().catch(err => console.log("Fullscreen bloqueado pelo navegador"));
+                    }
+
+                    app.player.playNext();
+                },
+
+                stop: () => {
+                    app.state.isPlaying = false;
+                    clearTimeout(app.state.slideInterval);
+                    if (document.exitFullscreen) document.exitFullscreen().catch(()=>{});
+                    document.getElementById('media-container').innerHTML = '';
+                    app.ui.navigate('view-admin');
+                },
+
+                playNext: () => {
+                    if (!app.state.isPlaying) return;
+
+                    if (app.state.playlist.length === 0) {
+                        console.warn("Playlist ficou vazia.");
+                        app.player.stop();
+                        return;
+                    }
+
+                    // Filtra apenas itens não pausados
+                    const activeItems = app.state.playlist.filter(item => !app.media.isItemPaused(item.id));
+                    
+                    if (activeItems.length === 0) {
+                        console.warn("Todos os itens estão pausados.");
+                        alert("Todos os itens da playlist estão pausados. Despause pelo menos um item para continuar.");
+                        app.player.stop();
+                        return;
+                    }
+
+                    // Encontra o índice do item atual na lista de itens ativos
+                    let activeIndex = activeItems.findIndex(item => item.id === app.state.playlist[app.state.currentIndex]?.id);
+                    
+                    // Se o item atual está pausado ou não encontrado, vai para o próximo
+                    if (activeIndex === -1 || app.media.isItemPaused(app.state.playlist[app.state.currentIndex]?.id)) {
+                        activeIndex = 0;
+                    } else {
+                        activeIndex = (activeIndex + 1) % activeItems.length;
+                    }
+
+                    // Atualiza o índice global para o próximo item ativo
+                    const nextActiveItem = activeItems[activeIndex];
+                    app.state.currentIndex = app.state.playlist.findIndex(item => item.id === nextActiveItem.id);
+
+                    if (app.state.currentIndex === -1) {
+                        app.state.currentIndex = 0;
+                    }
+
+                    const item = app.state.playlist[app.state.currentIndex];
+                    
+                    if (!item) {
+                        console.error("Item inválido na playlist.");
+                        app.state.currentIndex = 0;
+                        if(app.state.playlist.length > 0) {
+                            app.player.renderItem(app.state.playlist[0]);
+                        } else {
+                            app.player.stop();
+                        }
+                        return;
+                    }
+
+                    app.player.renderItem(item);
+                },
+
+                renderItem: async (item) => {
+                    if (!item || !item.blob) {
+                         console.error("Tentativa de renderizar item corrompido:", item);
+                         app.state.currentIndex++;
+                         app.player.playNext();
+                         return;
+                    }
+
+                    const container = document.getElementById('media-container');
+                    container.innerHTML = ''; 
+                    container.className = "w-full h-full flex items-center justify-center fade-in";
+
+                    const objectUrl = URL.createObjectURL(item.blob);
+
+                    // Se estiver fazendo cast, envia para o dispositivo
+                    if (app.cast.isCasting && window.cast && window.cast.framework) {
+                        app.cast.castMedia(objectUrl, item);
+                    }
+
+                    if (item.type === 'image') {
+                        const img = document.createElement('img');
+                        img.src = objectUrl;
+                        // object-contain garante que a imagem não estique
+                        img.className = "max-w-full max-h-full object-contain shadow-2xl";
+                        container.appendChild(img);
+
+                        app.state.slideInterval = setTimeout(() => {
+                            URL.revokeObjectURL(objectUrl);
+                            app.state.currentIndex++;
+                            app.player.playNext();
+                        }, item.duration * 1000);
+
+                    } else if (item.type === 'video') {
+                        const video = document.createElement('video');
+                        video.src = objectUrl;
+                        video.className = "w-full h-full object-contain";
+                        video.autoplay = true;
+                        video.muted = true; 
+                        
+                        video.onended = () => {
+                            URL.revokeObjectURL(objectUrl);
+                            app.state.currentIndex++;
+                            app.player.playNext();
+                        };
+                        
+                        video.onerror = () => {
+                            setTimeout(() => {
+                                app.state.currentIndex++;
+                                app.player.playNext();
+                            }, 3000);
+                        };
+
+                        container.appendChild(video);
+
+                    } else if (item.type === 'pdf') {
+                        try {
+                            const loadingTask = pdfjsLib.getDocument(objectUrl);
+                            const pdfDoc = await loadingTask.promise;
+                            
+                            app.state.currentPDFPage = 1;
+                            const totalPages = pdfDoc.numPages;
+
+                            const renderPage = async (pageNum) => {
+                                if (!app.state.isPlaying) return;
+
+                                if (pageNum > totalPages) {
+                                    URL.revokeObjectURL(objectUrl);
+                                    app.state.currentIndex++;
+                                    app.player.playNext();
+                                    return;
+                                }
+
+                                const page = await pdfDoc.getPage(pageNum);
+                                const scale = 3.0; // Aumentei a escala para ficar nítido em telas 4K verticais
+                                const viewport = page.getViewport({scale: scale});
+
+                                container.innerHTML = ''; 
+                                const canvas = document.createElement('canvas');
+                                canvas.id = 'pdf-canvas';
+                                canvas.className = "fade-in shadow-2xl";
+                                const context = canvas.getContext('2d');
+                                canvas.height = viewport.height;
+                                canvas.width = viewport.width;
+
+                                const aspectRatio = viewport.width / viewport.height;
+                                if (aspectRatio > 1) {
+                                    canvas.style.width = '100%';
+                                    canvas.style.height = 'auto';
+                                } else {
+                                    canvas.style.height = '100%';
+                                    canvas.style.width = 'auto';
+                                }
+
+                                container.appendChild(canvas);
+
+                                const renderContext = {
+                                    canvasContext: context,
+                                    viewport: viewport
+                                };
+                                await page.render(renderContext).promise;
+
+                                app.state.slideInterval = setTimeout(() => {
+                                    renderPage(pageNum + 1);
+                                }, item.duration * 1000);
+                            };
+
+                            renderPage(1);
+
+                        } catch (error) {
+                            console.error("Erro ao renderizar PDF", error);
+                            app.state.currentIndex++;
+                            app.player.playNext();
+                        }
+                    }
+                }
+            },
+
+            // --- MÓDULO UI (INTERFACE) ---
+            ui: {
+                navigate: (viewId) => {
+                    document.querySelectorAll('.view-section').forEach(el => el.classList.remove('active'));
+                    document.getElementById(viewId).classList.add('active');
+                },
+
+                renderPlaylistTable: (items) => {
+                    const tbody = document.getElementById('playlist-container');
+                    const emptyState = document.getElementById('empty-state');
+                    
+                    tbody.innerHTML = '';
+
+                    if (items.length === 0) {
+                        emptyState.classList.remove('hidden');
+                        return;
+                    }
+                    emptyState.classList.add('hidden');
+
+                    items.forEach((item, index) => {
+                        const tr = document.createElement('tr');
+                        tr.className = "hover:bg-gray-700/50 transition border-b border-gray-700 last:border-0";
+                        
+                        let icon = 'fa-file';
+                        if (item.type === 'image') icon = 'fa-image text-purple-400';
+                        if (item.type === 'video') icon = 'fa-film text-blue-400';
+                        if (item.type === 'pdf') icon = 'fa-file-powerpoint text-orange-400';
+
+                        tr.innerHTML = `
+                            <td class="p-2 sm:p-4"><i class="fa-solid ${icon} text-lg sm:text-xl"></i></td>
+                            <td class="p-2 sm:p-4 font-medium text-white truncate max-w-[150px] sm:max-w-xs" title="${item.name}">${item.name}</td>
+                            <td class="p-2 sm:p-4 uppercase text-xs">
+                                <span class="bg-gray-700 px-2 py-1 rounded text-gray-300 font-bold">${item.type}</span>
+                            </td>
+                            <td class="p-2 sm:p-4">
+                                <div class="flex items-center gap-1 sm:gap-2">
+                                    <input type="number" value="${item.duration}" min="1" 
+                                        onchange="app.media.updateDuration(${item.id}, this.value)"
+                                        class="w-12 sm:w-16 bg-gray-900 border border-gray-600 rounded p-1 sm:p-2 text-center text-white font-bold text-xs sm:text-sm focus:border-blue-500 outline-none">
+                                    <span class="text-[10px] sm:text-xs text-gray-500">seg</span>
+                                </div>
+                            </td>
+                            <td class="p-2 sm:p-4 text-right">
+                                <div class="flex items-center justify-end gap-2">
+                                    <button onclick="app.media.togglePauseItem(${item.id})" 
+                                        class="${app.media.isItemPaused(item.id) ? 'bg-yellow-900/20 hover:bg-yellow-900/50 text-yellow-500' : 'bg-gray-700/20 hover:bg-gray-700/50 text-gray-400'} p-1.5 sm:p-2 rounded transition" 
+                                        title="${app.media.isItemPaused(item.id) ? 'Despausar Propaganda' : 'Pausar Propaganda'}">
+                                        <i class="fa-solid ${app.media.isItemPaused(item.id) ? 'fa-play' : 'fa-pause'} text-sm sm:text-base"></i>
+                                    </button>
+                                    <button onclick="app.media.deleteItem(${item.id})" class="bg-red-900/20 hover:bg-red-900/50 text-red-500 p-1.5 sm:p-2 rounded transition" title="Excluir Permanentemente">
+                                        <i class="fa-solid fa-trash text-sm sm:text-base"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        `;
+                        tbody.appendChild(tr);
+                    });
+                },
+
+                updateClock: () => {
+                    const now = new Date();
+                    const timeString = now.toLocaleTimeString('pt-BR', {hour: '2-digit', minute:'2-digit'});
+                    // Data em extenso
+                    const options = { weekday: 'short', day: 'numeric', month: 'short' };
+                    const dateString = now.toLocaleDateString('pt-BR', options);
+                    
+                    const clockEl = document.getElementById('clock');
+                    const dateEl = document.getElementById('date');
+                    
+                    if(clockEl) clockEl.innerText = timeString;
+                    if(dateEl) dateEl.innerText = dateString.toUpperCase().replace('.', '');
+                },
+
+                updateNetworkStatus: () => {
+                    const indicator = document.getElementById('status-indicator');
+                    if (navigator.onLine) {
+                        indicator.classList.add('hidden');
+                    } else {
+                        indicator.classList.remove('hidden');
+                    }
+                }
+            },
+
+            // --- MÓDULO DE CASTING/ESPELHAMENTO (Chromecast, WebRTC, AirPlay) ---
+            cast: {
+                castSession: null,
+                mediaSession: null,
+                castReceiver: null,
+                isCasting: false,
+                currentDevice: null,
+                stream: null,
+                peerConnection: null,
+                localStream: null,
+
+                init: () => {
+                    // Inicializa Google Cast quando disponível
+                    if (window.cast && window.cast.framework) {
+                        window['__onGCastApiAvailable'] = (isAvailable) => {
+                            if (isAvailable) {
+                                app.cast.initializeCast();
+                            }
+                        };
+                    }
+
+                    // Verifica suporte para AirPlay (iOS/Safari)
+                    if (window.WebKitPlaybackTargetAvailabilityEvent) {
+                        const video = document.createElement('video');
+                        video.addEventListener('webkitplaybacktargetavailabilitychanged', (e) => {
+                            if (e.availability === 'available') {
+                                app.cast.airPlayAvailable = true;
+                            }
+                        });
+                    }
+                },
+
+                initializeCast: () => {
+                    try {
+                        const castContext = window.cast.framework.CastContext.getInstance();
+                        castContext.setOptions({
+                            receiverApplicationId: window.chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,
+                            autoJoinPolicy: window.chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED
+                        });
+
+                        castContext.addEventListener(
+                            window.cast.framework.CastContextEventType.CAST_STATE_CHANGED,
+                            (e) => {
+                                app.cast.onCastStateChanged(e);
+                            }
+                        );
+                    } catch (e) {
+                        console.log('Cast não disponível:', e);
+                    }
+                },
+
+                onCastStateChanged: (event) => {
+                    const castState = event.castState;
+                    if (castState === window.cast.framework.CastState.CONNECTED) {
+                        app.cast.isCasting = true;
+                        app.cast.updateCastStatus('Conectado');
+                    } else if (castState === window.cast.framework.CastState.NOT_CONNECTED) {
+                        app.cast.isCasting = false;
+                        app.cast.hideCastStatus();
+                    }
+                },
+
+                showDevices: () => {
+                    const modal = document.getElementById('cast-modal');
+                    modal.classList.remove('hidden');
+                    modal.classList.add('flex');
+                    app.cast.scanDevices();
+                },
+
+                hideDevices: () => {
+                    const modal = document.getElementById('cast-modal');
+                    modal.classList.add('hidden');
+                    modal.classList.remove('flex');
+                },
+
+                scanDevices: () => {
+                    const list = document.getElementById('cast-devices-list');
+                    list.innerHTML = '<div class="text-center text-gray-400 py-4"><i class="fa-solid fa-spinner fa-spin text-2xl mb-2"></i><p>Procurando dispositivos...</p></div>';
+
+                    // Busca dispositivos Chromecast
+                    setTimeout(() => {
+                        app.cast.findChromecastDevices();
+                        app.cast.findDLNADevices();
+                    }, 1000);
+                },
+
+                findChromecastDevices: () => {
+                    const list = document.getElementById('cast-devices-list');
+                    let html = '';
+
+                    try {
+                        if (window.cast && window.cast.framework) {
+                            const castContext = window.cast.framework.CastContext.getInstance();
+                            const session = castContext.getCurrentSession();
+                            
+                            if (session) {
+                                html += `
+                                    <div class="cast-device-item bg-gray-700 p-3 rounded cursor-pointer" onclick="app.cast.connectChromecast()">
+                                        <div class="flex items-center gap-3">
+                                            <i class="fa-brands fa-google text-red-500 text-xl"></i>
+                                            <div class="flex-1">
+                                                <p class="font-bold text-white">Chromecast Conectado</p>
+                                                <p class="text-xs text-gray-400">Dispositivo Google Cast</p>
+                                            </div>
+                                            <i class="fa-solid fa-check text-green-500"></i>
+                                        </div>
+                                    </div>
+                                `;
+                            } else {
+                                html += `
+                                    <div class="cast-device-item bg-gray-700 p-3 rounded cursor-pointer" onclick="app.cast.connectChromecast()">
+                                        <div class="flex items-center gap-3">
+                                            <i class="fa-brands fa-google text-red-500 text-xl"></i>
+                                            <div class="flex-1">
+                                                <p class="font-bold text-white">Chromecast</p>
+                                                <p class="text-xs text-gray-400">Clique para conectar</p>
+                                            </div>
+                                            <i class="fa-solid fa-chevron-right text-gray-400"></i>
+                                        </div>
+                                    </div>
+                                `;
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Chromecast não disponível');
+                    }
+
+                    // Adiciona opção de WebRTC (funciona em qualquer dispositivo)
+                    html += `
+                        <div class="cast-device-item bg-gray-700 p-3 rounded cursor-pointer" onclick="app.cast.startWebRTCMirroring()">
+                            <div class="flex items-center gap-3">
+                                <i class="fa-solid fa-wifi text-blue-500 text-xl"></i>
+                                <div class="flex-1">
+                                    <p class="font-bold text-white">Espelhamento WebRTC</p>
+                                    <p class="text-xs text-gray-400">Espelha tela via navegador</p>
+                                </div>
+                                <i class="fa-solid fa-chevron-right text-gray-400"></i>
+                            </div>
+                        </div>
+                    `;
+
+                    // Adiciona opção de AirPlay (iOS)
+                    if (app.cast.airPlayAvailable || navigator.userAgent.match(/iPhone|iPad|iPod/i)) {
+                        html += `
+                            <div class="cast-device-item bg-gray-700 p-3 rounded cursor-pointer" onclick="app.cast.startAirPlay()">
+                                <div class="flex items-center gap-3">
+                                    <i class="fa-brands fa-apple text-gray-300 text-xl"></i>
+                                    <div class="flex-1">
+                                        <p class="font-bold text-white">AirPlay</p>
+                                        <p class="text-xs text-gray-400">Dispositivos Apple</p>
+                                    </div>
+                                    <i class="fa-solid fa-chevron-right text-gray-400"></i>
+                                </div>
+                            </div>
+                        `;
+                    }
+
+                    if (html === '') {
+                        html = '<div class="text-center text-gray-400 py-4"><p>Nenhum dispositivo encontrado</p></div>';
+                    }
+
+                    list.innerHTML = html;
+                },
+
+                findDLNADevices: () => {
+                    // Implementação futura para DLNA/Miracast
+                },
+
+                connectChromecast: async () => {
+                    try {
+                        if (window.cast && window.cast.framework) {
+                            const castContext = window.cast.framework.CastContext.getInstance();
+                            await castContext.requestSession();
+                            app.cast.hideDevices();
+                            app.cast.updateCastStatus('Chromecast');
+                        } else {
+                            alert('Chromecast não está disponível. Certifique-se de que está usando Chrome ou Edge.');
+                        }
+                    } catch (e) {
+                        console.error('Erro ao conectar Chromecast:', e);
+                        alert('Erro ao conectar. Verifique se há dispositivos Chromecast na rede.');
+                    }
+                },
+
+                startWebRTCMirroring: () => {
+                    app.cast.hideDevices();
+                    
+                    // Cria um servidor WebRTC simples para espelhamento
+                    if (navigator.mediaDevices && navigator.mediaDevices.getDisplayMedia) {
+                        navigator.mediaDevices.getDisplayMedia({
+                            video: { 
+                                mediaSource: 'screen',
+                                width: { ideal: 1920 },
+                                height: { ideal: 1080 },
+                                frameRate: { ideal: 30 }
+                            },
+                            audio: true
+                        }).then((stream) => {
+                            app.cast.localStream = stream;
+                            app.cast.isCasting = true;
+                            app.cast.updateCastStatus('WebRTC - Espelhando Tela');
+                            
+                            // Cria um elemento de vídeo oculto para capturar o player
+                            const castVideo = document.createElement('video');
+                            castVideo.id = 'cast-video-preview';
+                            castVideo.srcObject = stream;
+                            castVideo.autoplay = true;
+                            castVideo.muted = true;
+                            castVideo.style.position = 'fixed';
+                            castVideo.style.top = '0';
+                            castVideo.style.left = '0';
+                            castVideo.style.width = '100%';
+                            castVideo.style.height = '100%';
+                            castVideo.style.zIndex = '9998';
+                            castVideo.style.objectFit = 'contain';
+                            castVideo.style.pointerEvents = 'none';
+                            document.body.appendChild(castVideo);
+                            
+                            // Para quando o usuário parar de compartilhar
+                            stream.getVideoTracks()[0].addEventListener('ended', () => {
+                                app.cast.stop();
+                            });
+
+                            // Notificação de sucesso
+                            const notification = document.createElement('div');
+                            notification.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-2xl z-[10000] flex items-center gap-2';
+                            notification.innerHTML = '<i class="fa-solid fa-check-circle"></i> <span>Espelhamento ativo! Sua tela está sendo transmitida.</span>';
+                            document.body.appendChild(notification);
+                            setTimeout(() => notification.remove(), 3000);
+                        }).catch((err) => {
+                            console.error('Erro ao iniciar espelhamento:', err);
+                            if (err.name === 'NotAllowedError') {
+                                alert('Permissão negada. Por favor, permita o compartilhamento de tela nas configurações do navegador.');
+                            } else {
+                                alert('Erro ao iniciar espelhamento. Verifique as permissões do navegador.');
+                            }
+                        });
+                    } else {
+                        alert('Espelhamento de tela não suportado neste navegador. Use Chrome, Edge ou Firefox atualizado.');
+                    }
+                },
+
+                startAirPlay: () => {
+                    app.cast.hideDevices();
+                    // AirPlay é nativo no iOS/Safari
+                    const video = document.createElement('video');
+                    video.setAttribute('x-webkit-airplay', 'allow');
+                    video.setAttribute('playsinline', 'true');
+                    app.cast.updateCastStatus('AirPlay');
+                    alert('Use o botão AirPlay no controle de mídia do iOS para espelhar.');
+                },
+
+                startMirroring: () => {
+                    // Inicia espelhamento completo da tela
+                    app.cast.startWebRTCMirroring();
+                },
+
+                updateCastStatus: (deviceName) => {
+                    const status = document.getElementById('cast-status');
+                    const nameEl = document.getElementById('cast-device-name');
+                    if (status && nameEl) {
+                        status.classList.remove('hidden');
+                        nameEl.textContent = deviceName;
+                    }
+                },
+
+                hideCastStatus: () => {
+                    const status = document.getElementById('cast-status');
+                    if (status) {
+                        status.classList.add('hidden');
+                    }
+                },
+
+                castMedia: (mediaUrl, item) => {
+                    try {
+                        if (window.cast && window.cast.framework) {
+                            const castContext = window.cast.framework.CastContext.getInstance();
+                            const session = castContext.getCurrentSession();
+                            
+                            if (session) {
+                                const mediaInfo = new window.chrome.cast.media.MediaInfo(mediaUrl, item.type === 'video' ? 'video/mp4' : 'image/jpeg');
+                                mediaInfo.metadata = new window.chrome.cast.media.GenericMediaMetadata();
+                                mediaInfo.metadata.title = item.name;
+                                
+                                const request = new window.chrome.cast.media.LoadRequest(mediaInfo);
+                                session.loadMedia(request);
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Erro ao fazer cast de mídia:', e);
+                    }
+                },
+
+                stop: () => {
+                    app.cast.isCasting = false;
+                    app.cast.hideCastStatus();
+                    
+                    // Para WebRTC
+                    if (app.cast.localStream) {
+                        app.cast.localStream.getTracks().forEach(track => track.stop());
+                        app.cast.localStream = null;
+                    }
+
+                    // Remove preview de vídeo e elementos de cast
+                    const castVideo = document.getElementById('cast-video-preview');
+                    if (castVideo) castVideo.remove();
+                    
+                    const videos = document.querySelectorAll('video[style*="z-index: 9998"], video[style*="z-index: 9999"]');
+                    videos.forEach(v => v.remove());
+
+                    // Para Chromecast
+                    try {
+                        if (window.cast && window.cast.framework) {
+                            const castContext = window.cast.framework.CastContext.getInstance();
+                            const session = castContext.getCurrentSession();
+                            if (session) {
+                                session.endSession(true);
+                            }
+                        }
+                    } catch (e) {
+                        console.log('Erro ao parar cast:', e);
+                    }
+                }
+            },
+
+            // --- PWA (INSTALAÇÃO & OFFLINE) ---
+            pwa: {
+                deferredPrompt: null,
+                userDismissedInstall: false,
+
+                isInstalled: () => {
+                    // Detecta se está instalado em diferentes plataformas
+                    // Android/Chrome
+                    if (window.matchMedia('(display-mode: standalone)').matches) {
+                        return true;
+                    }
+                    // iOS Safari
+                    if (window.navigator.standalone === true) {
+                        return true;
+                    }
+                    // Windows (Edge)
+                    if (window.navigator.userAgent.includes('Windows') && window.matchMedia('(display-mode: standalone)').matches) {
+                        return true;
+                    }
+                    // Verifica se foi instalado anteriormente
+                    if (localStorage.getItem('onplayer_installed') === 'true') {
+                        return true;
+                    }
+                    return false;
+                },
+
+                register: () => {
+                    // Verifica se já está instalado
+                    if (app.pwa.isInstalled()) {
+                        app.pwa.hideInstallButton();
+                        return;
+                    }
+
+                    // Verifica se usuário já escolheu não instalar
+                    if (localStorage.getItem('onplayer_use_without_install') === 'true') {
+                        app.pwa.hideInstallButton();
+                        return;
+                    }
+
+                    // Registra Service Worker
+                    if ('serviceWorker' in navigator) {
+                        app.pwa.registerServiceWorker();
+                    }
+
+                    // Cria Manifest dinâmico
+                    const manifest = {
+                        "name": "ONPLAYER Mídia Indoor",
+                        "short_name": "ONPLAYER",
+                        "description": "Sistema de Mídia Indoor - Player de apresentações offline",
+                        "start_url": ".",
+                        "display": "standalone",
+                        "orientation": "any",
+                        "background_color": "#000000",
+                        "theme_color": "#1f2937",
+                        "icons": [
+                            {
+                                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%233498db' d='M256 48C141.1 48 48 141.1 48 256s93.1 208 208 208 208-93.1 208-208S370.9 48 256 48zm-42.7 303.1l-80-80c-4.7-4.7-4.7-12.3 0-17l80-80c4.7-4.7 12.3-4.7 17 0l19.3 19.3c4.7 4.7 4.7 12.3 0 17L210.7 256l39.3 39.3c4.7 4.7 4.7 12.3 0 17l-19.3 19.3c-4.7 4.7-12.3 4.7-17 0zm149.3 0c-4.7 0-8.5-3.8-8.5-8.5v-143c0-4.7 3.8-8.5 8.5-8.5h19.3c4.7 0 8.5 3.8 8.5 8.5v143c0 4.7-3.8 8.5-8.5 8.5h-19.3z'/%3E%3C/svg%3E",
+                                "sizes": "192x192",
+                                "type": "image/svg+xml",
+                                "purpose": "any maskable"
+                            },
+                            {
+                                "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Cpath fill='%233498db' d='M256 48C141.1 48 48 141.1 48 256s93.1 208 208 208 208-93.1 208-208S370.9 48 256 48zm-42.7 303.1l-80-80c-4.7-4.7-4.7-12.3 0-17l80-80c4.7-4.7 12.3-4.7 17 0l19.3 19.3c4.7 4.7 4.7 12.3 0 17L210.7 256l39.3 39.3c4.7 4.7 4.7 12.3 0 17l-19.3 19.3c-4.7 4.7-12.3 4.7-17 0zm149.3 0c-4.7 0-8.5-3.8-8.5-8.5v-143c0-4.7 3.8-8.5 8.5-8.5h19.3c4.7 0 8.5 3.8 8.5 8.5v143c0 4.7-3.8 8.5-8.5 8.5h-19.3z'/%3E%3C/svg%3E",
+                                "sizes": "512x512",
+                                "type": "image/svg+xml",
+                                "purpose": "any maskable"
+                            }
+                        ]
+                    };
+                    const stringManifest = JSON.stringify(manifest);
+                    const blob = new Blob([stringManifest], {type: 'application/json'});
+                    const manifestURL = URL.createObjectURL(blob);
+                    document.getElementById('manifest-placeholder').setAttribute('href', manifestURL);
+
+                    // Detecta evento de instalação (Android/Chrome/Edge)
+                    window.addEventListener('beforeinstallprompt', (e) => {
+                        e.preventDefault();
+                        app.pwa.deferredPrompt = e;
+                        // Mostra o botão após um pequeno delay
+                        setTimeout(() => {
+                            app.pwa.showInstallButton();
+                        }, 2000);
+                    });
+
+                    // Para iOS Safari - mostra instruções
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                    const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
+                    
+                    if (isIOS && isSafari && !window.navigator.standalone) {
+                        setTimeout(() => {
+                            app.pwa.showInstallButton();
+                        }, 2000);
+                    }
+
+                    // Botão de instalação
+                    const installBtn = document.getElementById('install-pwa-btn');
+                    if (installBtn) {
+                        installBtn.addEventListener('click', () => {
+                            app.pwa.showInstallModal();
+                        });
+                    }
+
+                    // Monitora mudanças no modo de exibição
+                    window.addEventListener('appinstalled', () => {
+                        localStorage.setItem('onplayer_installed', 'true');
+                        app.pwa.hideInstallButton();
+                        app.pwa.hideInstallModal();
+                    });
+                },
+
+                showInstallButton: () => {
+                    if (app.pwa.isInstalled() || localStorage.getItem('onplayer_use_without_install') === 'true') {
+                        return;
+                    }
+                    const installBtn = document.getElementById('install-pwa-btn');
+                    if (installBtn) {
+                        installBtn.classList.add('show');
+                    }
+                },
+
+                hideInstallButton: () => {
+                    const installBtn = document.getElementById('install-pwa-btn');
+                    if (installBtn) {
+                        installBtn.classList.remove('show');
+                    }
+                },
+
+                showInstallModal: () => {
+                    const modal = document.getElementById('install-modal');
+                    if (modal) {
+                        modal.classList.remove('hidden');
+                        modal.classList.add('flex');
+                    }
+                },
+
+                hideInstallModal: () => {
+                    const modal = document.getElementById('install-modal');
+                    if (modal) {
+                        modal.classList.add('hidden');
+                        modal.classList.remove('flex');
+                    }
+                },
+
+                showInstallPrompt: () => {
+                    app.pwa.hideInstallModal();
+                    
+                    // Android/Chrome/Edge
+                    if (app.pwa.deferredPrompt) {
+                        app.pwa.install();
+                        return;
+                    }
+
+                    // iOS Safari - mostra instruções
+                    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
+                    if (isIOS) {
+                        alert('Para instalar no iOS:\n\n1. Toque no botão de compartilhar (quadrado com seta)\n2. Selecione "Adicionar à Tela de Início"\n3. Toque em "Adicionar"');
+                        return;
+                    }
+
+                    // Outros navegadores
+                    alert('Para instalar:\n\n- Chrome/Edge: Use o menu do navegador > "Instalar aplicativo"\n- Firefox: Use o menu > "Instalar"');
+                },
+
+                useWithoutInstall: () => {
+                    localStorage.setItem('onplayer_use_without_install', 'true');
+                    app.pwa.hideInstallModal();
+                    app.pwa.hideInstallButton();
+                    
+                    // Notificação
+                    const notification = document.createElement('div');
+                    notification.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-2xl z-[10001] flex items-center gap-2';
+                    notification.innerHTML = '<i class="fa-solid fa-check-circle"></i> <span>Você pode instalar depois pelo botão de instalação</span>';
+                    document.body.appendChild(notification);
+                    setTimeout(() => notification.remove(), 3000);
+                },
+
+                registerServiceWorker: () => {
+                    const swCode = `
+                        const CACHE_NAME = 'onplayer-v1';
+                        const urlsToCache = [
+                            '/',
+                            'https://cdn.tailwindcss.com',
+                            'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css',
+                            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+                            'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js'
+                        ];
+
+                        self.addEventListener('install', (event) => {
+                            event.waitUntil(
+                                caches.open(CACHE_NAME)
+                                    .then((cache) => cache.addAll(urlsToCache))
+                            );
+                        });
+
+                        self.addEventListener('fetch', (event) => {
+                            event.respondWith(
+                                caches.match(event.request)
+                                    .then((response) => response || fetch(event.request))
+                            );
+                        });
+                    `;
+
+                    const blob = new Blob([swCode], { type: 'application/javascript' });
+                    const swURL = URL.createObjectURL(blob);
+
+                    navigator.serviceWorker.register(swURL)
+                        .then(() => console.log('Service Worker registrado'))
+                        .catch(err => console.log('Erro ao registrar SW:', err));
+                },
+
+                install: async () => {
+                    if (!app.pwa.deferredPrompt) {
+                        app.pwa.showInstallPrompt();
+                        return;
+                    }
+
+                    try {
+                        app.pwa.deferredPrompt.prompt();
+                        const { outcome } = await app.pwa.deferredPrompt.userChoice;
+                        
+                        if (outcome === 'accepted') {
+                            localStorage.setItem('onplayer_installed', 'true');
+                            app.pwa.hideInstallButton();
+                            app.pwa.hideInstallModal();
+                            
+                            // Notificação de sucesso
+                            const notification = document.createElement('div');
+                            notification.className = 'fixed top-4 left-1/2 transform -translate-x-1/2 bg-green-600 text-white px-6 py-3 rounded-lg shadow-2xl z-[10001] flex items-center gap-2';
+                            notification.innerHTML = '<i class="fa-solid fa-check-circle"></i> <span>App instalado com sucesso!</span>';
+                            document.body.appendChild(notification);
+                            setTimeout(() => notification.remove(), 3000);
+                        }
+                    } catch (error) {
+                        console.error('Erro ao instalar:', error);
+                        app.pwa.showInstallPrompt();
+                    }
+                    
+                    app.pwa.deferredPrompt = null;
+                }
+            }
+        };
+
+        window.addEventListener('DOMContentLoaded', app.init);
+
+    </script>
+</body>
+</html>
